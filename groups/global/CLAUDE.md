@@ -23,6 +23,13 @@ Your output **internalLog** is information that will be logged internally but no
 
 For requests that can take time, consider sending a quick acknowledgment if appropriate via mcp__nanoclaw__send_message so the user knows you're working on it.
 
+## Locale
+
+- Timezone: Europe/Kyiv (UTC+2)
+- Time format: 24-hour (e.g., 14:30, not 2:30 PM)
+- Date format: DD.MM.YYYY (e.g., 06.02.2026)
+- Language: Ukrainian
+
 ## Your Workspace
 
 Files you create are saved in `/workspace/group/`. Use this for notes, research, or anything that should persist.

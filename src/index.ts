@@ -785,11 +785,13 @@ async function connectWhatsApp(): Promise<void> {
           try {
             const { transcribeAudioMessage } = await import('./transcription.js');
             const transcript = await transcribeAudioMessage(msg, sock);
-            if (transcript) {
+            const isFallback = !transcript || transcript.startsWith('[Voice Message');
+            if (!isFallback) {
               storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, `[Voice: ${transcript}]`);
               logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
             } else {
-              storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, '[Voice Message - transcription unavailable]');
+              storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, transcript || '[Voice Message - transcription unavailable]');
+              logger.warn({ chatJid }, 'Voice transcription returned fallback');
             }
           } catch (err) {
             logger.error({ err }, 'Voice transcription error');

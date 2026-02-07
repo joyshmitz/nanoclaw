@@ -4,6 +4,7 @@ import path from 'path';
 
 import makeWASocket, {
   DisconnectReason,
+  WAMessage,
   WASocket,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -47,8 +48,10 @@ import {
   storeChatMetadata,
   storeMessage,
   updateChatName,
+  updateMessageContent,
   updateTask,
 } from './db.js';
+import { transcribeAudioMessage } from './transcription.js';
 import { GroupQueue } from './group-queue.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { RegisteredGroup } from './types.js';
@@ -63,6 +66,8 @@ let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 // LID to phone number mapping (WhatsApp now sends LID JIDs for self-chats)
 let lidToPhoneMap: Record<string, string> = {};
+// In-memory store for pending voice messages (transcribed in queue)
+const pendingVoice = new Map<string, { msg: WAMessage; chatJid: string }>();
 // Guards to prevent duplicate loops on WhatsApp reconnect
 let messageLoopRunning = false;
 let ipcWatcherRunning = false;
@@ -208,6 +213,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   );
 
   if (missedMessages.length === 0) return true;
+
+  // Transcribe pending voice messages before building prompt
+  for (const m of missedMessages) {
+    const key = `${m.id}:${chatJid}`;
+    const pending = pendingVoice.get(key);
+    if (pending && m.content === '[Voice Message]') {
+      const transcript = await transcribeAudioMessage(pending.msg, sock);
+      if (transcript && transcript.trim().length > 0) {
+        const formatted = `[Voice: ${transcript.trim()}]`;
+        updateMessageContent(m.id, chatJid, formatted);
+        m.content = formatted;
+        logger.info({ chatJid }, 'Voice message transcribed');
+      }
+      pendingVoice.delete(key);
+    }
+  }
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
@@ -763,7 +784,7 @@ async function connectWhatsApp(): Promise<void> {
 
   sock.ev.on('creds.update', saveCreds);
 
-  sock.ev.on('messages.upsert', async ({ messages }) => {
+  sock.ev.on('messages.upsert', ({ messages }) => {
     for (const msg of messages) {
       if (!msg.message) continue;
       const rawJid = msg.key.remoteJid;
@@ -781,24 +802,11 @@ async function connectWhatsApp(): Promise<void> {
 
       // Only store full message content for registered groups
       if (registeredGroups[chatJid]) {
-        if (msg.message.audioMessage?.ptt) {
-          try {
-            const { transcribeAudioMessage } = await import('./transcription.js');
-            const transcript = await transcribeAudioMessage(msg, sock);
-            const isFallback = !transcript || transcript.startsWith('[Voice Message');
-            if (!isFallback) {
-              storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, `[Voice: ${transcript}]`);
-              logger.info({ chatJid, length: transcript.length }, 'Transcribed voice message');
-            } else {
-              storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, transcript || '[Voice Message - transcription unavailable]');
-              logger.warn({ chatJid }, 'Voice transcription returned fallback');
-            }
-          } catch (err) {
-            logger.error({ err }, 'Voice transcription error');
-            storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined, '[Voice Message - transcription failed]');
-          }
-        } else {
-          storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined);
+        storeMessage(msg, chatJid, msg.key.fromMe || false, msg.pushName || undefined);
+
+        // Voice: save reference for transcription in queue
+        if (msg.message?.audioMessage?.ptt && msg.key.id) {
+          pendingVoice.set(`${msg.key.id}:${chatJid}`, { msg, chatJid });
         }
       }
     }

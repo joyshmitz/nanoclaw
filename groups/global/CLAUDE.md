@@ -25,7 +25,7 @@ For requests that can take time, consider sending a quick acknowledgment if appr
 
 ## Locale
 
-- Timezone: Europe/Kyiv (UTC+2)
+- Timezone: Europe/Kyiv (UTC+2 winter / UTC+3 summer)
 - Time format: 24-hour (e.g., 14:30, not 2:30 PM)
 - Date format: DD.MM.YYYY (e.g., 06.02.2026)
 - Language: Ukrainian

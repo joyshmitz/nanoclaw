@@ -2,48 +2,36 @@ import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import { WAMessage, WASocket } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
 import { logger } from './logger.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 interface TranscriptionConfig {
   provider: string;
-  openai?: {
-    apiKey: string;
-    model: string;
-  };
-  groq?: {
-    apiKey: string;
-    model: string;
-  };
+  model?: string;
   enabled: boolean;
-  fallbackMessage: string;
 }
 
 function loadConfig(): TranscriptionConfig {
-  const configPath = path.join(__dirname, '../.transcription.config.json');
+  const configPath = path.join(process.cwd(), '.transcription.config.json');
   try {
     const configData = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(configData);
   } catch {
     logger.warn('Transcription config not found or invalid, disabling');
     return {
-      provider: 'openai',
+      provider: 'groq',
       enabled: false,
-      fallbackMessage: '[Voice Message - transcription unavailable]',
     };
   }
 }
 
 async function transcribeWithGroq(
   audioBuffer: Buffer,
-  config: TranscriptionConfig,
+  model: string,
 ): Promise<string | null> {
-  if (!config.groq?.apiKey || config.groq.apiKey === '') {
-    logger.warn('Groq API key not configured for transcription');
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    logger.warn('GROQ_API_KEY not set');
     return null;
   }
 
@@ -53,7 +41,7 @@ async function transcribeWithGroq(
     const toFile = openaiModule.toFile;
 
     const groq = new OpenAI({
-      apiKey: config.groq.apiKey,
+      apiKey,
       baseURL: 'https://api.groq.com/openai/v1',
     });
 
@@ -63,7 +51,7 @@ async function transcribeWithGroq(
 
     const transcription = await groq.audio.transcriptions.create({
       file,
-      model: config.groq.model || 'whisper-large-v3',
+      model,
       response_format: 'text',
     });
 
@@ -81,7 +69,7 @@ export async function transcribeAudioMessage(
   const config = loadConfig();
 
   if (!config.enabled) {
-    return config.fallbackMessage;
+    return null;
   }
 
   try {
@@ -97,36 +85,26 @@ export async function transcribeAudioMessage(
 
     if (!buffer || buffer.length === 0) {
       logger.error('Failed to download audio message: empty buffer');
-      return config.fallbackMessage;
+      return null;
     }
 
     logger.debug({ bytes: buffer.length }, 'Downloaded audio message');
 
-    let transcript: string | null = null;
-
     switch (config.provider) {
       case 'groq':
-        transcript = await transcribeWithGroq(buffer, config);
-        break;
+        return await transcribeWithGroq(
+          buffer,
+          config.model || 'whisper-large-v3',
+        );
       default:
         logger.error(
           { provider: config.provider },
           'Unknown transcription provider',
         );
-        return config.fallbackMessage;
+        return null;
     }
-
-    if (!transcript) {
-      return config.fallbackMessage;
-    }
-
-    return transcript.trim();
   } catch (err) {
     logger.error({ err }, 'Transcription error');
-    return config.fallbackMessage;
+    return null;
   }
-}
-
-export function isVoiceMessage(msg: WAMessage): boolean {
-  return msg.message?.audioMessage?.ptt === true;
 }

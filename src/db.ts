@@ -231,6 +231,16 @@ export function storeMessageDirect(msg: {
   );
 }
 
+export function updateMessageContent(
+  msgId: string,
+  chatJid: string,
+  content: string,
+): void {
+  db.prepare(
+    'UPDATE messages SET content = ? WHERE id = ? AND chat_jid = ?',
+  ).run(content, msgId, chatJid);
+}
+
 export function getNewMessages(
   jids: string[],
   lastTimestamp: string,

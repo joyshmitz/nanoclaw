@@ -37,6 +37,7 @@ import { startIpcWatcher } from './ipc.js';
 import { formatMessages, formatOutbound } from './router.js';
 import { startSchedulerLoop } from './task-scheduler.js';
 import { NewMessage, RegisteredGroup } from './types.js';
+import { transcribePendingVoice, addPendingVoice, startVoiceSweeper } from './voice-pipeline.js';
 import { logger } from './logger.js';
 
 // Re-export for backwards compatibility during refactor
@@ -140,6 +141,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     if (!hasTrigger) return true;
   }
 
+  await transcribePendingVoice(missedMessages);
   const prompt = formatMessages(missedMessages);
 
   // Advance cursor so the piping path in startMessageLoop won't re-fetch
@@ -350,6 +352,7 @@ async function startMessageLoop(): Promise<void> {
           );
           const messagesToSend =
             allPending.length > 0 ? allPending : groupMessages;
+          await transcribePendingVoice(messagesToSend);
           const formatted = formatMessages(messagesToSend);
 
           if (queue.sendMessage(chatJid, formatted)) {
@@ -474,6 +477,9 @@ async function main(): Promise<void> {
     onMessage: (chatJid, msg) => storeMessage(msg),
     onChatMetadata: (chatJid, timestamp) => storeChatMetadata(chatJid, timestamp),
     registeredGroups: () => registeredGroups,
+    onVoiceMessage: (chatJid, msgId, downloadAudio) => {
+      addPendingVoice(msgId, chatJid, downloadAudio);
+    },
   });
 
   // Connect — resolves when first connected
@@ -501,6 +507,7 @@ async function main(): Promise<void> {
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
   startMessageLoop();
+  startVoiceSweeper();
 }
 
 // Guard: only run when executed directly, not when imported by tests

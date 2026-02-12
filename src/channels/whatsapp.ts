@@ -5,6 +5,7 @@ import path from 'path';
 import makeWASocket, {
   DisconnectReason,
   WASocket,
+  downloadMediaMessage,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
 } from '@whiskeysockets/baileys';
@@ -24,6 +25,7 @@ export interface WhatsAppChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+  onVoiceMessage?: (chatJid: string, msgId: string, downloadAudio: () => Promise<Buffer>) => void;
 }
 
 export class WhatsAppChannel implements Channel {
@@ -160,11 +162,13 @@ export class WhatsAppChannel implements Channel {
         // Only deliver full message for registered groups
         const groups = this.opts.registeredGroups();
         if (groups[chatJid]) {
+          const isVoice = !!msg.message?.audioMessage?.ptt;
           const content =
             msg.message?.conversation ||
             msg.message?.extendedTextMessage?.text ||
             msg.message?.imageMessage?.caption ||
             msg.message?.videoMessage?.caption ||
+            (isVoice ? '[Voice Message]' : '') ||
             '';
           const sender = msg.key.participant || msg.key.remoteJid || '';
           const senderName = msg.pushName || sender.split('@')[0];
@@ -178,6 +182,16 @@ export class WhatsAppChannel implements Channel {
             timestamp,
             is_from_me: msg.key.fromMe || false,
           });
+
+          if (isVoice && this.opts.onVoiceMessage) {
+            const sockAtReceipt = this.sock;
+            const downloadAudio = async () =>
+              (await downloadMediaMessage(msg, 'buffer', {}, {
+                logger: logger as any,
+                reuploadRequest: sockAtReceipt.updateMediaMessage,
+              })) as Buffer;
+            this.opts.onVoiceMessage(chatJid, msg.key.id || '', downloadAudio);
+          }
         }
       }
     });

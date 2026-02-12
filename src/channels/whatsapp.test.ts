@@ -502,10 +502,10 @@ describe('WhatsAppChannel', () => {
         },
       ]);
 
-      // Still delivered but with empty content
+      // Voice messages get [Voice Message] placeholder for later transcription
       expect(opts.onMessage).toHaveBeenCalledWith(
         'registered@g.us',
-        expect.objectContaining({ content: '' }),
+        expect.objectContaining({ content: '[Voice Message]' }),
       );
     });
 

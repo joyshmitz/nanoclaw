@@ -108,7 +108,7 @@ describe('transcribePendingVoice', () => {
     expect(pendingVoice.size).toBe(0);
   });
 
-  it('stops after MAX_VOICE_PER_CYCLE', async () => {
+  it('stops after MAX_VOICE_PER_CYCLE (success path)', async () => {
     const messages: NewMessage[] = [];
     for (let i = 0; i < MAX_VOICE_PER_CYCLE + 2; i++) {
       const msg = makeMessage({ id: `msg-${i}` });
@@ -124,6 +124,36 @@ describe('transcribePendingVoice', () => {
 
     const transcribed = messages.filter(m => m.content.startsWith('[Voice:'));
     expect(transcribed.length).toBe(MAX_VOICE_PER_CYCLE);
+  });
+
+  it('stops after MAX_VOICE_PER_CYCLE even when all fail', async () => {
+    const messages: NewMessage[] = [];
+    const downloadFns: ReturnType<typeof vi.fn>[] = [];
+    for (let i = 0; i < MAX_VOICE_PER_CYCLE + 2; i++) {
+      const msg = makeMessage({ id: `fail-${i}` });
+      messages.push(msg);
+      const fn = vi.fn(async () => { throw new Error('network'); });
+      downloadFns.push(fn);
+      pendingVoice.set(`fail-${i}:group@g.us`, {
+        downloadAudio: fn,
+        chatJid: 'group@g.us',
+        createdAt: Date.now(),
+      });
+    }
+
+    await transcribePendingVoice(messages);
+
+    // Only MAX_VOICE_PER_CYCLE downloads should have been attempted
+    const called = downloadFns.filter(fn => fn.mock.calls.length > 0);
+    expect(called.length).toBe(MAX_VOICE_PER_CYCLE);
+
+    // Remaining entries should still be in the map (not attempted)
+    expect(pendingVoice.size).toBe(2);
+
+    // All attempted messages keep placeholder (fail-open)
+    for (const msg of messages) {
+      expect(msg.content).toBe('[Voice Message]');
+    }
   });
 });
 

@@ -27,10 +27,10 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
 }
 
 export async function transcribePendingVoice(messages: NewMessage[]): Promise<void> {
-  let transcribed = 0;
+  let attempted = 0;
   for (const m of messages) {
     if (m.content !== '[Voice Message]') continue;
-    if (transcribed >= MAX_VOICE_PER_CYCLE) break;
+    if (attempted >= MAX_VOICE_PER_CYCLE) break;
 
     const key = `${m.id}:${m.chat_jid}`;
     const pending = pendingVoice.get(key);
@@ -45,6 +45,7 @@ export async function transcribePendingVoice(messages: NewMessage[]): Promise<vo
       continue;
     }
 
+    attempted++;
     try {
       const buffer = await withTimeout(pending.downloadAudio(), VOICE_DOWNLOAD_TIMEOUT_MS, 'download');
       const transcript = await withTimeout(
@@ -59,7 +60,6 @@ export async function transcribePendingVoice(messages: NewMessage[]): Promise<vo
       } else {
         logger.info({ key }, 'Voice: empty transcript (provider_disabled or empty)');
       }
-      transcribed++;
     } catch (err) {
       logger.warn({ key, err }, 'Voice: transcription failed, keeping placeholder (download_failed/timeout)');
     } finally {
